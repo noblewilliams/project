@@ -51,7 +51,7 @@ def handleStartResponse(chat_id, message_id):
 def handleUnavailableFeatureResponse(chat_id, message_id):
     response_message = "Feature coming soon"
     bot.sendMessage(
-        chat_id=chat_id, text=welcome_message, reply_to_message_id=message_id
+        chat_id=chat_id, text=response_message, reply_to_message_id=message_id
     )
 
 
