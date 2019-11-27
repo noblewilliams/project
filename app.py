@@ -39,6 +39,7 @@ def respond():
         handleStartResponse(chat_id, message_id)
     else:
         handleUnavailableFeatureResponse(chat_id, message_id)
+    return 'ok'
 
 
 def handleStartResponse(chat_id, message_id):
