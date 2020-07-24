@@ -1,2 +1,5 @@
-botenv/
 .vscode
+.env
+venv/
+*.pyc
+.DS_Store
