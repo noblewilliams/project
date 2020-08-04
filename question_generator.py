@@ -11,6 +11,7 @@ nlp = en_core_web_md.load()
 from gensim.test.utils import datapath, get_tmpfile
 from gensim.models import KeyedVectors
 import gensim.downloader as api
+from random import sample
 model = api.load("glove-wiki-gigaword-50")
 
 def dumpPickle(fileName, content):
@@ -270,6 +271,6 @@ def generateQuestions(text, count):
     
     orderedQaPairs = sortAnswers(qaPairs)
     
-    questions = addDistractors(orderedQaPairs[:count], 5)
+    questions = addDistractors(sample(orderedQaPairs, count), 4)
 
     return questions

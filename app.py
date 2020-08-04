@@ -8,7 +8,7 @@ import textract
 import redis
 from random import shuffle
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, ReplyKeyboardRemove
-from question_generator import generateQuestions 
+from question_generator import generateQuestions
 
 global bot, TOKEN, URL
 
@@ -16,10 +16,11 @@ TOKEN = os.environ.get('bot_token')
 URL = os.environ.get('URL')
 bot = telegram.Bot(token=TOKEN)
 
-redis_client = redis.StrictRedis(
-    host="localhost", port=os.environ.get('REDIS_PORT') , db=0, decode_responses=True)
+redis_client = redis.StrictRedis.from_url(
+    url=os.environ.get('REDIS_URL'), decode_responses=True)
 
 app = Flask(__name__)
+
 
 @app.route('/setwebhook', methods=['GET', 'POST'])
 def set_webhook():
@@ -37,58 +38,92 @@ def respond():
     chat_id = update.message.chat.id
     message_id = update.message.message_id
 
-    current_quiz_index = redis_client.get("{}-quiz-index".format(chat_id))
-    print("current quiz index {}".format(current_quiz_index))
-    print(redis_client.lrange("{}-answers".format(chat_id), 0, -1))
-    if(current_quiz_index):
-        current_quiz_index = int(current_quiz_index)
+    quiz_started = redis_client.hget(
+        "{}-context".format(chat_id), "quiz-started")
+    intent_index = redis_client.hget(
+        "{}-context".format(chat_id), "intent-index")
+
+    if(quiz_started):
+        next_question_set_index = int(intent_index) - 1
         if(update.message.text):
             text = update.message.text.encode("utf-8").decode()
             if(is_command_message(text)):
                 handle_command_messages(text, chat_id, message_id)
             else:
-                text = update.message.text.encode("utf-8").decode()
                 quiz = json.loads(redis_client.get("{}-quiz".format(chat_id)))
-                previous_question_answer = update.message.text.encode(
-                    "utf-8").decode()
                 redis_client.rpush(
-                    "{}-answers".format(chat_id), previous_question_answer)
-                if(current_quiz_index == len(quiz)):
+                    "{}-answers".format(chat_id), text)
+                if next_question_set_index == len(quiz):
+                    return_answer_feedback(
+                        chat_id, next_question_set_index - 1, text)
                     return_quiz_result(chat_id)
                     clear_quiz_session(chat_id)
                     clear_keyboard(chat_id)
                 else:
-                    quiz_question_set = quiz[current_quiz_index]
+                    quiz_question_set = quiz[next_question_set_index]
+                    return_answer_feedback(
+                        chat_id, next_question_set_index - 1, text)
                     return_next_question(chat_id, quiz_question_set)
-                    redis_client.set(
-                        "{}-quiz-index".format(chat_id), current_quiz_index + 1)
+                    redis_client.hset(
+                        "{}-context".format(chat_id), "intent-index", int(intent_index) + 1
+                    )
         elif(update.message.document):
             reply_keyboard_markup = get_markup(["Yes", "No"])
             bot.sendMessage(chat_id, "Hey, you haven't finished answering all the questions on this quiz. Would you like to quit your current quiz?",
-                    reply_markup=reply_keyboard_markup)
+                            reply_markup=reply_keyboard_markup)
         else:
-            pass
+            bot.sendMessage(
+                chat_id, "Sorry, I can't understand the file format you just sent.🙃")
     else:
         if(update.message.document):
-            current_quiz_index = 0
             file_id = update.message.document.file_id
             file_content = get_file_content(chat_id, file_id)
-            quiz = get_quizset_from_file_content(file_content)
-            redis_client.set("{}-quiz".format(chat_id), json.dumps(quiz))
-            quiz_question_set = quiz[current_quiz_index]
-            return_next_question(chat_id, quiz_question_set)
-            redis_client.set("{}-quiz-index".format(chat_id),
-                             current_quiz_index + 1)
+            redis_client.hset("{}-context".format(chat_id),
+                              "file-content", file_content)
+            redis_client.hset("{}-context".format(chat_id), "intent-index", 1)
+            get_number_of_questions(chat_id)
+
         elif update.message.text:
             text = update.message.text.encode("utf-8").decode()
-            if(is_command_message(text)):
+            if is_command_message(text):
                 handle_command_messages(text, chat_id, message_id)
-
+            elif asked_for_number_of_questions(intent_index):
+                if text.isdigit():
+                    number_of_questions = int(text)
+                    redis_client.hset(
+                        "{}-context".format(chat_id), "intent-index", 2)
+                    file_content = redis_client.hget(
+                        "{}-context".format(chat_id), "file-content")
+                    quiz = get_quizset_from_file_content(
+                        file_content, number_of_questions)
+                    initialize_quiz(chat_id, quiz)
+                    quiz_question_set = quiz[0]
+                    return_next_question(chat_id, quiz_question_set)
+                else:
+                    bot.sendMessage(
+                        chat_id, "Sorry, you have entered an invalid number. Please type in a valid number")
     return 'ok'
 
 
-def clear_keyboard(chat_id): 
-    bot.sendMessage(chat_id,"I'll be available whenever you need me",reply_markup = ReplyKeyboardRemove())
+def clear_keyboard(chat_id):
+    bot.sendMessage(chat_id, "I'll be available whenever you need me",
+                    reply_markup=ReplyKeyboardRemove())
+
+
+
+def asked_for_number_of_questions(intent_index):
+    return intent_index == "1"
+
+
+def return_answer_feedback(chat_id, question_index, user_answer):
+    quiz = json.loads(redis_client.get("{}-quiz".format(chat_id)))
+    correct_answer = quiz[question_index]["answer"]
+    if user_answer == correct_answer:
+        bot.sendMessage(chat_id, "Yay!! You got the question right ✅")
+    else:
+        bot.sendMessage(
+            chat_id, "Sorry, you got this question wrong ❌\n\nThe correct answer is: {}".format(correct_answer))
+
 
 def return_quiz_result(chat_id):
     user_answers = redis_client.lrange("{}-answers".format(chat_id), 0, -1)
@@ -104,11 +139,23 @@ def return_quiz_result(chat_id):
 def clear_quiz_session(chat_id):
     redis_client.delete("{}-answers".format(chat_id))
     redis_client.delete("{}-quiz".format(chat_id))
-    redis_client.delete("{}-quiz-index".format(chat_id))
+    redis_client.delete("{}-context".format(chat_id))
+
+
+def initialize_quiz(chat_id, quiz):
+    redis_client.hset("{}-context".format(chat_id), "quiz-started", 1)
+    redis_client.set("{}-quiz".format(chat_id), json.dumps(quiz))
+
+
+def get_number_of_questions(chat_id):
+    bot.sendMessage(chat_id, "File Received ✅")
+    bot.sendMessage(
+        chat_id, "How many questions would you like me to generate for you?")
 
 
 def is_command_message(text):
     return text.startswith('/')
+
 
 def return_next_question(chat_id, quiz_question_set):
     question_text = quiz_question_set["question"]
@@ -121,20 +168,30 @@ def return_next_question(chat_id, quiz_question_set):
                     reply_markup=reply_keyboard_markup)
 
 
-def get_quizset_from_file_content(file_content):
-    return generateQuestions(file_content, 5)
+def get_quizset_from_file_content(file_content, number_of_questions):
+    return generateQuestions(file_content, number_of_questions)
+
 
 def handle_command_messages(text, chat_id, message_id):
     if(text == "/start"):
         handle_start_response(chat_id, message_id)
     elif (text == "/help"):
         handle_help_response(chat_id, message_id)
+    elif (text == "/cancel"):
+        clear_user_sesssion(chat_id, message_id)
 
 
 def handle_start_response(chat_id, message_id):
     welcome_message = "Welcome to QuizBot. I can help you generate quizzes from documents. Send a document and I'll help you generate questions from it"
     bot.sendMessage(
         chat_id=chat_id, text=welcome_message, reply_to_message_id=message_id
+    )
+
+
+def clear_user_sesssion(chat_id, message_id):
+    clear_quiz_session(chat_id)
+    bot.sendMessage(
+        chat_id=chat_id, text="Session cleared ✅", reply_to_message_id=message_id
     )
 
 
@@ -178,9 +235,11 @@ def get_content_from_pdf(file_path):
     text = textract.process(file_path).decode("utf-8")
     return re.sub("\n|\r", "",  text)
 
+
 @app.route('/')
 def index():
     return 'Server running'
+
 
 if __name__ == '__main__':
     app.run(threaded=True)
