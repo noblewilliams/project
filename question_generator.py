@@ -6,8 +6,8 @@ from pathlib import Path
 import gensim
 import spacy
 from spacy import displacy
-import en_core_web_md
-nlp = en_core_web_md.load()
+import en_core_web_sm
+nlp = en_core_web_sm.load()
 from gensim.test.utils import datapath, get_tmpfile
 from gensim.models import KeyedVectors
 import gensim.downloader as api

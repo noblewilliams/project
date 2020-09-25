@@ -132,8 +132,8 @@ def return_quiz_result(chat_id):
     for i in range(len(quiz)):
         if(user_answers[i] == quiz[i]["answer"]):
             no_of_correct_questions += 1
-    bot.sendMessage(chat_id, "You got {} questions right".format(
-        no_of_correct_questions))
+    bot.sendMessage(chat_id, "You got {} questions out of {} questions".format(
+        no_of_correct_questions, len(quiz)))
 
 
 def clear_quiz_session(chat_id):
