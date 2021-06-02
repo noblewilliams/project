@@ -106,7 +106,7 @@ tqdm==4.48.0
 traitlets==4.3.3
 typed-ast==1.4.0
 tzlocal==1.5.1
-urllib3==1.25.7
+urllib3==1.26.5
 wasabi==0.7.1
 wcwidth==0.2.5
 webencodings==0.5.1
